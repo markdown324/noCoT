@@ -1,15 +1,32 @@
-<div class="settings-adv-block">
-    <div class="settings-adv-block-header">流式隐藏设置</div>
-    <div class="settings-adv-block-content">
-        <label for="stream_hider_marker">分割标记 (在此之前的文本将被隐藏)</label>
-        <small>例如: &lt;/thinking&gt; 或 [START]</small>
-        <input id="stream_hider_marker" class="text_pole" type="text" placeholder="</thinking>" />
+<div class="noCoT_settings">
+    <div class="inline-drawer">
+        <div class="inline-drawer-toggle inline-drawer-header">
+            <b>noCoT</b>
+            <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
+        </div>
+        <div class="inline-drawer-content">
+            <div class="noCoT_block">
+                <label for="stream_hider_marker">
+                    <span>分割标记</span>
+                    <small>在此标记之前的内容将被处理，例如: &lt;/thinking&gt;</small>
+                </label>
+                <input id="stream_hider_marker" class="text_pole" type="text" placeholder="</thinking>" />
+            </div>
 
-        <div class="settings-line">
-            <label class="checkbox_label">
-                <input id="stream_hider_show_indicator" type="checkbox" checked />
-                显示“思考中”占位符
-            </label>
+            <div class="noCoT_block">
+                <label class="checkbox_label">
+                    <input id="stream_hider_show_indicator" type="checkbox" checked />
+                    <span>流式输出时显示"思考中"占位符</span>
+                </label>
+            </div>
+
+            <div class="noCoT_block">
+                <label class="checkbox_label">
+                    <input id="stream_hider_show_collapsed" type="checkbox" />
+                    <span>将隐藏内容显示在可折叠区域中</span>
+                </label>
+                <small>启用后，标记前的内容会显示在一个默认折叠的"思考过程"区域</small>
+            </div>
         </div>
     </div>
 </div>
