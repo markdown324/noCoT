@@ -14,7 +14,7 @@
 ### 方法一：通过 SillyTavern 安装（推荐）
 
 1. 打开 SillyTavern 设置 → 扩展 → 安装扩展
-2. 输入仓库地址：`https://github.com/your-repo/noCoT`
+2. 输入仓库地址：`https://github.com/markdown324/noCoT`
 3. 点击安装
 4. 刷新页面
 
