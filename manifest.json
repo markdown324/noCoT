@@ -1,0 +1,9 @@
+{
+    "display_name": "Stream Content Hider",
+    "version": "1.0.0",
+    "author": "User",
+    "js": "index.js",
+    "css": "style.css",
+    "settings": "settings.html",
+    "loading_order": 100
+}

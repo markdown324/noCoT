@@ -1,0 +1,41 @@
+/* 当处于“等待标记”状态时 */
+.mes_text.waiting-for-marker {
+    /* 将字体大小设为0，实际上隐藏了文字，但保留了DOM存在 */
+    font-size: 0 !important;
+    line-height: 0 !important;
+    color: transparent !important;
+    position: relative;
+    min-height: 20px;
+}
+
+/* 隐藏内部所有子元素 */
+.mes_text.waiting-for-marker * {
+    display: none !important;
+}
+
+/* 显示占位符 (如果启用) */
+.mes_text.waiting-for-marker.show-indicator::after {
+    content: "🧠 深度思考中...";
+    /* 你可以自定义这个提示 */
+    font-size: 14px !important;
+    line-height: 1.5 !important;
+    color: #888 !important;
+    font-style: italic;
+    display: block;
+    padding: 5px;
+    animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+    0% {
+        opacity: 0.5;
+    }
+
+    50% {
+        opacity: 1;
+    }
+
+    100% {
+        opacity: 0.5;
+    }
+}
