@@ -1,33 +1,13 @@
-// noCoT - 极简调试版本
-// 用于定位冷启动卡死问题
+// noCoT - Stream Content Hider Extension
+// 修复了 MutationObserver 无限循环导致的内存溢出问题
 
-console.log('[noCoT] === SCRIPT FILE PARSING START ===');
-
-let extension_settings, saveSettingsDebounced;
-
-try {
-    console.log('[noCoT] Attempting to import extensions.js...');
-    const extModule = await import('../../../extensions.js');
-    extension_settings = extModule.extension_settings;
-    console.log('[noCoT] extensions.js imported successfully');
-} catch (e) {
-    console.error('[noCoT] Failed to import extensions.js:', e);
-}
-
-try {
-    console.log('[noCoT] Attempting to import script.js...');
-    const scriptModule = await import('../../../../script.js');
-    saveSettingsDebounced = scriptModule.saveSettingsDebounced;
-    console.log('[noCoT] script.js imported successfully');
-} catch (e) {
-    console.error('[noCoT] Failed to import script.js:', e);
-}
-
-console.log('[noCoT] === IMPORTS COMPLETE ===');
+import { extension_settings } from "../../../extensions.js";
+import { saveSettingsDebounced } from "../../../../script.js";
 
 const EXTENSION_NAME = "noCoT";
 const EXTENSION_FOLDER_PATH = `scripts/extensions/third-party/${EXTENSION_NAME}`;
 const DEFAULT_MARKER = "</thinking>";
+const DEBUG = true;
 
 let currentMarker = DEFAULT_MARKER;
 let showIndicator = true;
@@ -35,17 +15,15 @@ let showCollapsed = false;
 let streamStartTime = null;
 let observer = null;
 
+// 防重入锁 - 防止 MutationObserver 无限循环
+let isProcessing = false;
+
 function debugLog(...args) {
-    console.log(`[${EXTENSION_NAME}]`, ...args);
+    if (DEBUG) console.log(`[${EXTENSION_NAME}]`, ...args);
 }
 
 function loadSettings() {
     try {
-        if (!extension_settings) {
-            debugLog('extension_settings not available');
-            return;
-        }
-
         if (!extension_settings[EXTENSION_NAME]) {
             extension_settings[EXTENSION_NAME] = {
                 marker: DEFAULT_MARKER,
@@ -67,41 +45,32 @@ function loadSettings() {
 
 function bindSettingsEvents() {
     try {
-        const $marker = jQuery('#stream_hider_marker');
-        const $indicator = jQuery('#stream_hider_show_indicator');
-        const $collapsed = jQuery('#stream_hider_show_collapsed');
-
-        if ($marker.length) {
-            $marker.val(currentMarker).on('input', function () {
-                if (extension_settings && extension_settings[EXTENSION_NAME]) {
-                    extension_settings[EXTENSION_NAME].marker = jQuery(this).val();
-                    currentMarker = jQuery(this).val();
-                    if (saveSettingsDebounced) saveSettingsDebounced();
-                }
+        $('#stream_hider_marker')
+            .val(currentMarker)
+            .off('input.noCoT')
+            .on('input.noCoT', function () {
+                extension_settings[EXTENSION_NAME].marker = $(this).val();
+                currentMarker = $(this).val();
+                saveSettingsDebounced();
             });
-        }
 
-        if ($indicator.length) {
-            $indicator.prop('checked', showIndicator).on('change', function () {
-                if (extension_settings && extension_settings[EXTENSION_NAME]) {
-                    extension_settings[EXTENSION_NAME].indicator = jQuery(this).is(':checked');
-                    showIndicator = jQuery(this).is(':checked');
-                    if (saveSettingsDebounced) saveSettingsDebounced();
-                }
+        $('#stream_hider_show_indicator')
+            .prop('checked', showIndicator)
+            .off('change.noCoT')
+            .on('change.noCoT', function () {
+                extension_settings[EXTENSION_NAME].indicator = $(this).is(':checked');
+                showIndicator = $(this).is(':checked');
+                saveSettingsDebounced();
             });
-        }
 
-        if ($collapsed.length) {
-            $collapsed.prop('checked', showCollapsed).on('change', function () {
-                if (extension_settings && extension_settings[EXTENSION_NAME]) {
-                    extension_settings[EXTENSION_NAME].showCollapsed = jQuery(this).is(':checked');
-                    showCollapsed = jQuery(this).is(':checked');
-                    if (saveSettingsDebounced) saveSettingsDebounced();
-                }
+        $('#stream_hider_show_collapsed')
+            .prop('checked', showCollapsed)
+            .off('change.noCoT')
+            .on('change.noCoT', function () {
+                extension_settings[EXTENSION_NAME].showCollapsed = $(this).is(':checked');
+                showCollapsed = $(this).is(':checked');
+                saveSettingsDebounced();
             });
-        }
-
-        debugLog('Settings events bound');
     } catch (e) {
         console.error('[noCoT] bindSettingsEvents error:', e);
     }
@@ -113,56 +82,47 @@ function getThinkingDurationText() {
     return `思考了 ${seconds} 秒`;
 }
 
-function createOrUpdateThinkingWrapper(targetDiv, thinkingContent, isStreaming) {
-    try {
-        let wrapper = targetDiv.querySelector('.noCoT-thinking-wrapper');
+function createThinkingWrapper(thinkingContent, isStreaming) {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'noCoT-thinking-wrapper' + (isStreaming ? ' streaming' : '');
+    wrapper.innerHTML = `
+        <button class="noCoT-thinking-toggle" type="button">
+            <span class="toggle-text">${getThinkingDurationText()}</span>
+            <span class="toggle-icon">▼</span>
+        </button>
+        <div class="noCoT-thinking-content">
+            <div class="thinking-text"></div>
+        </div>
+    `;
 
-        if (!wrapper) {
-            wrapper = document.createElement('div');
-            wrapper.className = 'noCoT-thinking-wrapper' + (isStreaming ? ' streaming' : '');
-            wrapper.innerHTML = `
-                <button class="noCoT-thinking-toggle" type="button">
-                    <span class="toggle-text">${getThinkingDurationText()}</span>
-                    <span class="toggle-icon">▼</span>
-                </button>
-                <div class="noCoT-thinking-content">
-                    <div class="thinking-text"></div>
-                </div>
-            `;
+    wrapper.querySelector('.noCoT-thinking-toggle').onclick = function () {
+        this.classList.toggle('expanded');
+        wrapper.querySelector('.noCoT-thinking-content').classList.toggle('expanded');
+    };
 
-            wrapper.querySelector('.noCoT-thinking-toggle').onclick = function () {
-                this.classList.toggle('expanded');
-                wrapper.querySelector('.noCoT-thinking-content').classList.toggle('expanded');
-            };
-
-            targetDiv.innerHTML = '';
-            targetDiv.appendChild(wrapper);
-
-            const mainDiv = document.createElement('div');
-            mainDiv.className = 'noCoT-main-content';
-            targetDiv.appendChild(mainDiv);
-        }
-
-        const thinkingText = wrapper.querySelector('.thinking-text');
-        if (thinkingText) {
-            thinkingText.textContent = thinkingContent.replace(/<[^>]*>/g, '');
-        }
-
-        const toggleText = wrapper.querySelector('.toggle-text');
-        if (toggleText) {
-            toggleText.textContent = getThinkingDurationText();
-        }
-
-        wrapper.classList.toggle('streaming', isStreaming);
-        return wrapper;
-    } catch (e) {
-        console.error('[noCoT] createOrUpdateThinkingWrapper error:', e);
-        return null;
+    const thinkingText = wrapper.querySelector('.thinking-text');
+    if (thinkingText) {
+        thinkingText.textContent = thinkingContent.replace(/<[^>]*>/g, '');
     }
+
+    return wrapper;
 }
 
 function handleStreamingMessage(targetDiv) {
     if (!targetDiv) return;
+
+    // 防重入检查 - 避免无限循环
+    if (isProcessing) return;
+
+    // 检查是否已经被处理过（有我们的标记）
+    if (targetDiv.dataset.noCoTProcessed === 'true') {
+        // 只更新思考时长，不修改 DOM 结构
+        const toggleText = targetDiv.querySelector('.noCoT-thinking-toggle .toggle-text');
+        if (toggleText && streamStartTime) {
+            toggleText.textContent = getThinkingDurationText();
+        }
+        return;
+    }
 
     try {
         const rawHtml = targetDiv.innerHTML;
@@ -171,33 +131,62 @@ function handleStreamingMessage(targetDiv) {
         const markerIndex = rawHtml.indexOf(currentMarker);
 
         if (markerIndex === -1) {
+            // 标记还没出现
             if (showCollapsed) {
+                // 折叠模式
                 if (!streamStartTime) streamStartTime = Date.now();
-                createOrUpdateThinkingWrapper(targetDiv, rawHtml, true);
+
+                // 检查是否需要创建 wrapper
+                if (!targetDiv.querySelector('.noCoT-thinking-wrapper')) {
+                    isProcessing = true;
+
+                    const wrapper = createThinkingWrapper(rawHtml, true);
+                    const mainDiv = document.createElement('div');
+                    mainDiv.className = 'noCoT-main-content';
+
+                    targetDiv.innerHTML = '';
+                    targetDiv.appendChild(wrapper);
+                    targetDiv.appendChild(mainDiv);
+                    targetDiv.dataset.noCoTProcessed = 'true';
+
+                    isProcessing = false;
+                }
             } else {
+                // 隐藏模式
                 if (!targetDiv.classList.contains('waiting-for-marker')) {
                     targetDiv.classList.add('waiting-for-marker', 'hide-mode');
                     if (showIndicator) targetDiv.classList.add('show-indicator');
                 }
             }
         } else {
+            // 标记已出现 - 最终处理
+            isProcessing = true;
+
             targetDiv.classList.remove('waiting-for-marker', 'hide-mode', 'show-indicator');
+            targetDiv.dataset.noCoTProcessed = 'true';
 
             const parts = rawHtml.split(currentMarker);
             const thinkingContent = parts[0];
             const mainContent = parts.slice(1).join(currentMarker);
 
             if (showCollapsed && thinkingContent.trim()) {
-                createOrUpdateThinkingWrapper(targetDiv, thinkingContent, false);
-                const mainDiv = targetDiv.querySelector('.noCoT-main-content');
-                if (mainDiv) mainDiv.innerHTML = mainContent;
+                const wrapper = createThinkingWrapper(thinkingContent, false);
+                const mainDiv = document.createElement('div');
+                mainDiv.className = 'noCoT-main-content';
+                mainDiv.innerHTML = mainContent;
+
+                targetDiv.innerHTML = '';
+                targetDiv.appendChild(wrapper);
+                targetDiv.appendChild(mainDiv);
             } else {
                 targetDiv.innerHTML = mainContent;
             }
 
             streamStartTime = null;
+            isProcessing = false;
         }
     } catch (e) {
+        isProcessing = false;
         console.error('[noCoT] handleStreamingMessage error:', e);
     }
 }
@@ -208,33 +197,39 @@ function startObserver() {
     const chat = document.getElementById('chat');
     if (!chat) return false;
 
-    observer = new MutationObserver(function () {
+    observer = new MutationObserver(function (mutations) {
+        // 防重入检查
+        if (isProcessing) return;
+
         try {
             const lastMsg = document.querySelector('.last_mes .mes_text');
-            if (lastMsg) handleStreamingMessage(lastMsg);
+            if (lastMsg) {
+                handleStreamingMessage(lastMsg);
+            }
         } catch (e) {
             console.error('[noCoT] Observer error:', e);
         }
     });
 
-    observer.observe(chat, { childList: true, subtree: true, characterData: true });
+    observer.observe(chat, {
+        childList: true,
+        subtree: true,
+        characterData: true
+    });
+
     debugLog('Observer started');
     return true;
 }
 
 // 主入口
-console.log('[noCoT] === SETTING UP JQUERY READY ===');
-
 jQuery(function () {
-    console.log('[noCoT] === JQUERY READY FIRED ===');
-
     debugLog('Initializing extension...');
+
     loadSettings();
 
-    // 加载设置面板
-    jQuery.get(`${EXTENSION_FOLDER_PATH}/settings.html`)
+    $.get(`${EXTENSION_FOLDER_PATH}/settings.html`)
         .done(function (html) {
-            jQuery('#extensions_settings2').append(html);
+            $('#extensions_settings2').append(html);
             debugLog('Settings panel loaded');
             bindSettingsEvents();
         })
@@ -242,7 +237,6 @@ jQuery(function () {
             console.error('[noCoT] Failed to load settings panel:', err);
         });
 
-    // 启动观察器
     if (!startObserver()) {
         let retries = 0;
         const timer = setInterval(function () {
@@ -254,5 +248,3 @@ jQuery(function () {
 
     debugLog('Extension initialized! Marker:', currentMarker);
 });
-
-console.log('[noCoT] === SCRIPT FILE PARSING END ===');
