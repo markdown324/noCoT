@@ -17,8 +17,9 @@
 
 /* ===== 流式隐藏样式 ===== */
 
-/* 当处于"等待标记"状态时 - 完全隐藏模式 */
-.mes_text.waiting-for-marker.hide-mode {
+/* 当处于"等待标记"状态时 - 隐藏模式和折叠模式都需要隐藏内容 */
+.mes_text.waiting-for-marker.hide-mode,
+.mes_text.waiting-for-marker.collapse-mode {
     font-size: 0 !important;
     line-height: 0 !important;
     color: transparent !important;
@@ -26,7 +27,8 @@
     min-height: 20px;
 }
 
-.mes_text.waiting-for-marker.hide-mode * {
+.mes_text.waiting-for-marker.hide-mode *,
+.mes_text.waiting-for-marker.collapse-mode * {
     display: none !important;
 }
 
