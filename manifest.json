@@ -1,9 +1,11 @@
 {
-    "display_name": "Stream Content Hider",
-    "version": "1.0.0",
-    "author": "User",
+    "display_name": "Stream Content Hider (noCoT)",
+    "version": "1.1.0",
+    "author": "markdown324",
     "js": "index.js",
     "css": "style.css",
-    "settings": "settings.html",
-    "loading_order": 100
+    "loading_order": 100,
+    "homePage": "https://github.com/markdown324/noCoT",
+    "auto_update": true,
+    "minimum_client_version": "1.13.0"
 }
