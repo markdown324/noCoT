@@ -79,13 +79,33 @@ const noCoT = {
         let rawContent;
         if (typeof data === 'string') {
             rawContent = data;
+        } else if (typeof data === 'number') {
+            // data 是消息索引，需要从 chat 数组获取内容
+            if (this.chat && this.chat[data]) {
+                rawContent = this.chat[data].mes;
+                this.debugLog('Got content from chat array at index', data);
+            } else {
+                this.debugLog('Cannot find message at index', data, 'in chat array');
+                // 尝试从 DOM 获取
+                const lastMesText = document.querySelector('.last_mes .mes_text');
+                if (lastMesText) {
+                    rawContent = lastMesText.textContent || lastMesText.innerText;
+                    this.debugLog('Got content from DOM instead');
+                } else {
+                    return;
+                }
+            }
         } else if (data && data.mes) {
             rawContent = data.mes;
         } else if (data && typeof data === 'object') {
-            // 尝试查找消息内容
             rawContent = data.message || data.content || data.text || JSON.stringify(data);
         } else {
             this.debugLog('Cannot extract message content from data');
+            return;
+        }
+
+        if (!rawContent) {
+            this.debugLog('rawContent is empty');
             return;
         }
 
@@ -219,13 +239,14 @@ const noCoT = {
         }).then(function (mod) {
             self.saveSettingsDebounced = mod.saveSettingsDebounced;
 
-            // 尝试从 script.js 模块获取 eventSource 和 event_types
+            // 尝试从 script.js 模块获取 eventSource、event_types 和 chat
             self.eventSource = mod.eventSource;
             self.event_types = mod.event_types;
+            self.chat = mod.chat;
 
             self.debugLog('Modules loaded');
-            self.debugLog('mod.eventSource:', mod.eventSource);
-            self.debugLog('mod.event_types:', mod.event_types);
+            self.debugLog('mod.chat:', mod.chat);
+            self.debugLog('mod.chat length:', mod.chat ? mod.chat.length : 'N/A');
 
             self.postInit();
         }).catch(function (err) {
