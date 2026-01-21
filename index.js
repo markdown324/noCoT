@@ -97,7 +97,11 @@
 
         const idx = html.indexOf(currentMarker);
 
-        debugLog('handleMessage - marker found:', idx !== -1, 'html length:', html.length);
+        // 详细调试信息
+        debugLog('=== handleMessage ===');
+        debugLog('currentMarker:', JSON.stringify(currentMarker));
+        debugLog('html (first 300 chars):', html.substring(0, 300));
+        debugLog('marker found:', idx !== -1, 'at index:', idx);
 
         if (idx === -1) {
             // 标记未出现 - 隐藏模式
