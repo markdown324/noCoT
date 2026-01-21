@@ -1,5 +1,5 @@
 // noCoT - Stream Content Hider Extension
-// 回退到稳定版本 - 仅隐藏模式
+// 使用 SillyTavern 事件系统获取原始消息内容
 
 (function () {
     'use strict';
@@ -7,6 +7,7 @@
     const EXTENSION_NAME = "noCoT";
     const EXTENSION_FOLDER_PATH = `scripts/extensions/third-party/${EXTENSION_NAME}`;
     const DEFAULT_MARKER = "</thinking>";
+    const DEBUG = true;
 
     let extension_settings = null;
     let saveSettingsDebounced = null;
@@ -16,8 +17,11 @@
     let observer = null;
     let isProcessing = false;
 
+    // 存储已处理消息的 ID，避免重复处理
+    let processedMessages = new Set();
+
     function debugLog(...args) {
-        console.log(`[${EXTENSION_NAME}]`, ...args);
+        if (DEBUG) console.log(`[${EXTENSION_NAME}]`, ...args);
     }
 
     function loadModulesAndInit() {
@@ -82,12 +86,85 @@
         });
     }
 
-    function handleMessage(targetDiv) {
-        if (!targetDiv || isProcessing) return;
+    // 处理已完成的消息（通过事件系统，获取原始内容）
+    function handleMessageReceived(data) {
+        debugLog('=== MESSAGE_RECEIVED ===');
+        debugLog('data:', data);
 
-        // 如果已处理完成，确保类被移除并跳过
+        if (!data || !data.mes) {
+            debugLog('No message content in data');
+            return;
+        }
+
+        const rawContent = data.mes;
+        debugLog('Raw content (first 500 chars):', rawContent.substring(0, 500));
+        debugLog('Looking for marker:', currentMarker);
+
+        const markerIndex = rawContent.indexOf(currentMarker);
+        debugLog('Marker found:', markerIndex !== -1, 'at index:', markerIndex);
+
+        if (markerIndex === -1) {
+            debugLog('Marker not found in message');
+            return;
+        }
+
+        // 找到标记，提取内容
+        const thinkingContent = rawContent.substring(0, markerIndex);
+        const mainContent = rawContent.substring(markerIndex + currentMarker.length);
+
+        debugLog('Thinking content length:', thinkingContent.length);
+        debugLog('Main content length:', mainContent.length);
+
+        // 更新最后一条消息的显示
+        setTimeout(function () {
+            updateLastMessageDisplay(thinkingContent, mainContent);
+        }, 100);
+    }
+
+    // 更新最后一条消息的显示
+    function updateLastMessageDisplay(thinkingContent, mainContent) {
+        const lastMesText = document.querySelector('.last_mes .mes_text');
+        if (!lastMesText) {
+            debugLog('Could not find last message text element');
+            return;
+        }
+
+        if (lastMesText.dataset.noCoTDone === 'true') {
+            debugLog('Message already processed');
+            return;
+        }
+
+        isProcessing = true;
+        lastMesText.classList.remove('waiting-for-marker', 'hide-mode', 'show-indicator');
+        lastMesText.dataset.noCoTDone = 'true';
+
+        if (showCollapsed && thinkingContent.trim()) {
+            // 折叠模式
+            const escapedThinking = thinkingContent
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;');
+
+            lastMesText.innerHTML = '<div class="noCoT-thinking-wrapper">' +
+                '<button class="noCoT-thinking-toggle" type="button" onclick="this.classList.toggle(\'expanded\');this.nextElementSibling.classList.toggle(\'expanded\');">' +
+                '<span class="toggle-text">查看思考过程</span><span class="toggle-icon">▼</span></button>' +
+                '<div class="noCoT-thinking-content"><div class="thinking-text">' + escapedThinking + '</div></div></div>' +
+                '<div class="noCoT-main-content">' + lastMesText.innerHTML.split(currentMarker.replace(/</g, '&lt;').replace(/>/g, '&gt;')).slice(1).join('') + '</div>';
+            debugLog('Applied collapsed mode');
+        } else {
+            // 隐藏模式 - 需要重新渲染主内容
+            // 由于 ST 已经渲染了完整内容，我们需要移除思考部分
+            // 找到渲染后的分隔点比较困难，这里采用简化方案
+            debugLog('Hide mode - content already rendered by ST');
+        }
+
+        isProcessing = false;
+    }
+
+    // 流式输出时的处理（用于隐藏模式）
+    function handleStreamingMessage(targetDiv) {
+        if (!targetDiv || isProcessing) return;
         if (targetDiv.dataset.noCoTDone === 'true') {
-            // 确保隐藏类被移除（可能被 ST 重新添加）
             targetDiv.classList.remove('waiting-for-marker', 'hide-mode', 'show-indicator');
             return;
         }
@@ -95,67 +172,21 @@
         const html = targetDiv.innerHTML;
         if (!html || html.length < 5) return;
 
-        // 同时搜索原始标记和 HTML 转义版本
-        // 例如: </thinking> 和 &lt;/thinking&gt;
-        const escapedMarker = currentMarker
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;');
+        // 同时检查原始和转义版本
+        const escapedMarker = currentMarker.replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-        let idx = html.indexOf(currentMarker);
-        let usedMarker = currentMarker;
-
-        if (idx === -1) {
-            idx = html.indexOf(escapedMarker);
-            usedMarker = escapedMarker;
+        if (html.indexOf(currentMarker) !== -1 || html.indexOf(escapedMarker) !== -1) {
+            // 标记已出现，等待 MESSAGE_RECEIVED 事件处理
+            targetDiv.classList.remove('waiting-for-marker', 'hide-mode', 'show-indicator');
+            return;
         }
 
-        // 详细调试信息
-        debugLog('=== handleMessage ===');
-        debugLog('html length:', html.length);
-        debugLog('html content (first 2000 chars):', html.substring(0, 2000));
-        debugLog('currentMarker:', currentMarker, 'escapedMarker:', escapedMarker);
-        debugLog('marker found:', idx !== -1, 'at index:', idx, 'using:', usedMarker);
-
-        if (idx === -1) {
-            // 标记未出现 - 隐藏模式
-            if (!showCollapsed) {
-                if (!targetDiv.classList.contains('waiting-for-marker')) {
-                    targetDiv.classList.add('waiting-for-marker', 'hide-mode');
-                    if (showIndicator) targetDiv.classList.add('show-indicator');
-                    debugLog('Added hiding classes');
-                }
+        // 标记未出现 - 隐藏模式
+        if (!showCollapsed) {
+            if (!targetDiv.classList.contains('waiting-for-marker')) {
+                targetDiv.classList.add('waiting-for-marker', 'hide-mode');
+                if (showIndicator) targetDiv.classList.add('show-indicator');
             }
-        } else {
-            // 标记已出现
-            debugLog('Marker found! Processing...');
-            isProcessing = true;
-
-            // 立即移除隐藏类
-            targetDiv.classList.remove('waiting-for-marker', 'hide-mode', 'show-indicator');
-            targetDiv.dataset.noCoTDone = 'true';
-
-            const parts = html.split(usedMarker);
-            const thinkingContent = parts[0];
-            const mainContent = parts.slice(1).join(usedMarker);
-
-            debugLog('Thinking content length:', thinkingContent.length, 'Main content length:', mainContent.length);
-
-            if (showCollapsed && thinkingContent.trim()) {
-                // 折叠模式
-                targetDiv.innerHTML = '<div class="noCoT-thinking-wrapper">' +
-                    '<button class="noCoT-thinking-toggle" type="button" onclick="this.classList.toggle(\'expanded\');this.nextElementSibling.classList.toggle(\'expanded\');">' +
-                    '<span class="toggle-text">查看思考过程</span><span class="toggle-icon">▼</span></button>' +
-                    '<div class="noCoT-thinking-content"><div class="thinking-text">' +
-                    thinkingContent.replace(/<[^>]*>/g, '').replace(/</g, '&lt;').replace(/>/g, '&gt;') +
-                    '</div></div></div>' +
-                    '<div class="noCoT-main-content">' + mainContent + '</div>';
-            } else {
-                // 隐藏模式 - 只显示主内容
-                targetDiv.innerHTML = mainContent;
-                debugLog('Set innerHTML to main content');
-            }
-
-            isProcessing = false;
         }
     }
 
@@ -168,7 +199,7 @@
         observer = new MutationObserver(function () {
             if (isProcessing) return;
             const msg = document.querySelector('.last_mes .mes_text');
-            if (msg) handleMessage(msg);
+            if (msg) handleStreamingMessage(msg);
         });
 
         observer.observe(chat, { childList: true, subtree: true, characterData: true });
@@ -195,6 +226,15 @@
                 console.error('[noCoT] Settings panel error:', e);
             });
 
+        // 注册消息接收事件（获取原始内容）
+        if (typeof eventSource !== 'undefined' && typeof event_types !== 'undefined') {
+            eventSource.on(event_types.MESSAGE_RECEIVED, handleMessageReceived);
+            debugLog('Registered MESSAGE_RECEIVED event handler');
+        } else {
+            debugLog('eventSource or event_types not available, using observer only');
+        }
+
+        // 启动观察器（用于流式输出时的隐藏）
         if (!startObserver()) {
             let tries = 0;
             const timer = setInterval(function () {
