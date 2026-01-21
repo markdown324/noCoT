@@ -1,169 +1,163 @@
 // noCoT - Stream Content Hider Extension
-// 使用 SillyTavern 事件系统获取原始消息内容
+// 不使用 IIFE，以便访问 SillyTavern 全局变量
 
-(function () {
-    'use strict';
+const noCoT = {
+    EXTENSION_NAME: "noCoT",
+    EXTENSION_FOLDER_PATH: "scripts/extensions/third-party/noCoT",
+    DEFAULT_MARKER: "</thinking>",
+    DEBUG: true,
 
-    const EXTENSION_NAME = "noCoT";
-    const EXTENSION_FOLDER_PATH = `scripts/extensions/third-party/${EXTENSION_NAME}`;
-    const DEFAULT_MARKER = "</thinking>";
-    const DEBUG = true;
+    extension_settings: null,
+    saveSettingsDebounced: null,
+    currentMarker: "</thinking>",
+    showIndicator: true,
+    showCollapsed: false,
+    observer: null,
+    isProcessing: false,
 
-    let extension_settings = null;
-    let saveSettingsDebounced = null;
-    let currentMarker = DEFAULT_MARKER;
-    let showIndicator = true;
-    let showCollapsed = false;
-    let observer = null;
-    let isProcessing = false;
+    debugLog: function (...args) {
+        if (this.DEBUG) console.log(`[${this.EXTENSION_NAME}]`, ...args);
+    },
 
-    // 存储已处理消息的 ID，避免重复处理
-    let processedMessages = new Set();
-
-    function debugLog(...args) {
-        if (DEBUG) console.log(`[${EXTENSION_NAME}]`, ...args);
-    }
-
-    function loadModulesAndInit() {
-        import('../../../extensions.js').then(function (mod) {
-            extension_settings = mod.extension_settings;
-            return import('../../../../script.js');
-        }).then(function (mod) {
-            saveSettingsDebounced = mod.saveSettingsDebounced;
-            debugLog('Modules loaded');
-            initExtension();
-        }).catch(function (err) {
-            console.error('[noCoT] Module load error:', err);
-        });
-    }
-
-    function loadSettings() {
-        if (!extension_settings) return;
+    loadSettings: function () {
+        if (!this.extension_settings) return;
 
         try {
-            if (!extension_settings[EXTENSION_NAME]) {
-                extension_settings[EXTENSION_NAME] = {
-                    marker: DEFAULT_MARKER,
+            if (!this.extension_settings[this.EXTENSION_NAME]) {
+                this.extension_settings[this.EXTENSION_NAME] = {
+                    marker: this.DEFAULT_MARKER,
                     indicator: true,
                     showCollapsed: false
                 };
             }
 
-            const settings = extension_settings[EXTENSION_NAME];
-            currentMarker = settings.marker || DEFAULT_MARKER;
-            showIndicator = settings.indicator !== false;
-            showCollapsed = settings.showCollapsed === true;
+            const settings = this.extension_settings[this.EXTENSION_NAME];
+            this.currentMarker = settings.marker || this.DEFAULT_MARKER;
+            this.showIndicator = settings.indicator !== false;
+            this.showCollapsed = settings.showCollapsed === true;
 
-            debugLog('Settings loaded');
+            this.debugLog('Settings loaded');
         } catch (e) {
             console.error('[noCoT] loadSettings error:', e);
         }
-    }
+    },
 
-    function bindSettingsEvents() {
-        jQuery('#stream_hider_marker').val(currentMarker).on('input', function () {
-            if (extension_settings && extension_settings[EXTENSION_NAME]) {
-                extension_settings[EXTENSION_NAME].marker = jQuery(this).val();
-                currentMarker = jQuery(this).val();
-                if (saveSettingsDebounced) saveSettingsDebounced();
+    bindSettingsEvents: function () {
+        const self = this;
+
+        jQuery('#stream_hider_marker').val(this.currentMarker).on('input', function () {
+            if (self.extension_settings && self.extension_settings[self.EXTENSION_NAME]) {
+                self.extension_settings[self.EXTENSION_NAME].marker = jQuery(this).val();
+                self.currentMarker = jQuery(this).val();
+                if (self.saveSettingsDebounced) self.saveSettingsDebounced();
             }
         });
 
-        jQuery('#stream_hider_show_indicator').prop('checked', showIndicator).on('change', function () {
-            if (extension_settings && extension_settings[EXTENSION_NAME]) {
-                extension_settings[EXTENSION_NAME].indicator = jQuery(this).is(':checked');
-                showIndicator = jQuery(this).is(':checked');
-                if (saveSettingsDebounced) saveSettingsDebounced();
+        jQuery('#stream_hider_show_indicator').prop('checked', this.showIndicator).on('change', function () {
+            if (self.extension_settings && self.extension_settings[self.EXTENSION_NAME]) {
+                self.extension_settings[self.EXTENSION_NAME].indicator = jQuery(this).is(':checked');
+                self.showIndicator = jQuery(this).is(':checked');
+                if (self.saveSettingsDebounced) self.saveSettingsDebounced();
             }
         });
 
-        jQuery('#stream_hider_show_collapsed').prop('checked', showCollapsed).on('change', function () {
-            if (extension_settings && extension_settings[EXTENSION_NAME]) {
-                extension_settings[EXTENSION_NAME].showCollapsed = jQuery(this).is(':checked');
-                showCollapsed = jQuery(this).is(':checked');
-                if (saveSettingsDebounced) saveSettingsDebounced();
+        jQuery('#stream_hider_show_collapsed').prop('checked', this.showCollapsed).on('change', function () {
+            if (self.extension_settings && self.extension_settings[self.EXTENSION_NAME]) {
+                self.extension_settings[self.EXTENSION_NAME].showCollapsed = jQuery(this).is(':checked');
+                self.showCollapsed = jQuery(this).is(':checked');
+                if (self.saveSettingsDebounced) self.saveSettingsDebounced();
             }
         });
-    }
+    },
 
-    // 处理已完成的消息（通过事件系统，获取原始内容）
-    function handleMessageReceived(data) {
-        debugLog('=== MESSAGE_RECEIVED ===');
-        debugLog('data:', data);
+    handleMessageReceived: function (data) {
+        this.debugLog('=== MESSAGE_RECEIVED ===');
+        this.debugLog('data:', data);
 
         if (!data || !data.mes) {
-            debugLog('No message content in data');
+            this.debugLog('No message content in data');
             return;
         }
 
         const rawContent = data.mes;
-        debugLog('Raw content (first 500 chars):', rawContent.substring(0, 500));
-        debugLog('Looking for marker:', currentMarker);
+        this.debugLog('Raw content (first 500 chars):', rawContent.substring(0, 500));
+        this.debugLog('Looking for marker:', this.currentMarker);
 
-        const markerIndex = rawContent.indexOf(currentMarker);
-        debugLog('Marker found:', markerIndex !== -1, 'at index:', markerIndex);
+        const markerIndex = rawContent.indexOf(this.currentMarker);
+        this.debugLog('Marker found:', markerIndex !== -1, 'at index:', markerIndex);
 
         if (markerIndex === -1) {
-            debugLog('Marker not found in message');
+            this.debugLog('Marker not found in message');
             return;
         }
 
         // 找到标记，提取内容
         const thinkingContent = rawContent.substring(0, markerIndex);
-        const mainContent = rawContent.substring(markerIndex + currentMarker.length);
+        const mainContent = rawContent.substring(markerIndex + this.currentMarker.length);
 
-        debugLog('Thinking content length:', thinkingContent.length);
-        debugLog('Main content length:', mainContent.length);
+        this.debugLog('Thinking content length:', thinkingContent.length);
+        this.debugLog('Main content length:', mainContent.length);
 
         // 更新最后一条消息的显示
+        const self = this;
         setTimeout(function () {
-            updateLastMessageDisplay(thinkingContent, mainContent);
+            self.updateLastMessageDisplay(thinkingContent, mainContent);
         }, 100);
-    }
+    },
 
-    // 更新最后一条消息的显示
-    function updateLastMessageDisplay(thinkingContent, mainContent) {
+    updateLastMessageDisplay: function (thinkingContent, mainContent) {
         const lastMesText = document.querySelector('.last_mes .mes_text');
         if (!lastMesText) {
-            debugLog('Could not find last message text element');
+            this.debugLog('Could not find last message text element');
             return;
         }
 
         if (lastMesText.dataset.noCoTDone === 'true') {
-            debugLog('Message already processed');
+            this.debugLog('Message already processed');
             return;
         }
 
-        isProcessing = true;
+        this.isProcessing = true;
         lastMesText.classList.remove('waiting-for-marker', 'hide-mode', 'show-indicator');
         lastMesText.dataset.noCoTDone = 'true';
 
-        if (showCollapsed && thinkingContent.trim()) {
+        this.debugLog('Updating message display, showCollapsed:', this.showCollapsed);
+
+        if (this.showCollapsed && thinkingContent.trim()) {
             // 折叠模式
             const escapedThinking = thinkingContent
                 .replace(/&/g, '&amp;')
                 .replace(/</g, '&lt;')
                 .replace(/>/g, '&gt;');
 
+            // 获取当前渲染后的内容并移除思考部分
+            const currentHtml = lastMesText.innerHTML;
+            const escapedMarker = this.currentMarker.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            const markerInHtml = currentHtml.indexOf(escapedMarker);
+            const displayContent = markerInHtml !== -1 ? currentHtml.substring(markerInHtml + escapedMarker.length) : currentHtml;
+
             lastMesText.innerHTML = '<div class="noCoT-thinking-wrapper">' +
                 '<button class="noCoT-thinking-toggle" type="button" onclick="this.classList.toggle(\'expanded\');this.nextElementSibling.classList.toggle(\'expanded\');">' +
                 '<span class="toggle-text">查看思考过程</span><span class="toggle-icon">▼</span></button>' +
                 '<div class="noCoT-thinking-content"><div class="thinking-text">' + escapedThinking + '</div></div></div>' +
-                '<div class="noCoT-main-content">' + lastMesText.innerHTML.split(currentMarker.replace(/</g, '&lt;').replace(/>/g, '&gt;')).slice(1).join('') + '</div>';
-            debugLog('Applied collapsed mode');
+                '<div class="noCoT-main-content">' + displayContent + '</div>';
+            this.debugLog('Applied collapsed mode');
         } else {
-            // 隐藏模式 - 需要重新渲染主内容
-            // 由于 ST 已经渲染了完整内容，我们需要移除思考部分
-            // 找到渲染后的分隔点比较困难，这里采用简化方案
-            debugLog('Hide mode - content already rendered by ST');
+            // 隐藏模式 - 移除思考部分
+            const currentHtml = lastMesText.innerHTML;
+            const escapedMarker = this.currentMarker.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            const markerInHtml = currentHtml.indexOf(escapedMarker);
+            if (markerInHtml !== -1) {
+                lastMesText.innerHTML = currentHtml.substring(markerInHtml + escapedMarker.length);
+                this.debugLog('Applied hide mode - removed thinking content');
+            }
         }
 
-        isProcessing = false;
-    }
+        this.isProcessing = false;
+    },
 
-    // 流式输出时的处理（用于隐藏模式）
-    function handleStreamingMessage(targetDiv) {
-        if (!targetDiv || isProcessing) return;
+    handleStreamingMessage: function (targetDiv) {
+        if (!targetDiv || this.isProcessing) return;
         if (targetDiv.dataset.noCoTDone === 'true') {
             targetDiv.classList.remove('waiting-for-marker', 'hide-mode', 'show-indicator');
             return;
@@ -172,85 +166,129 @@
         const html = targetDiv.innerHTML;
         if (!html || html.length < 5) return;
 
-        // 同时检查原始和转义版本
-        const escapedMarker = currentMarker.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        const escapedMarker = this.currentMarker.replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-        if (html.indexOf(currentMarker) !== -1 || html.indexOf(escapedMarker) !== -1) {
-            // 标记已出现，等待 MESSAGE_RECEIVED 事件处理
+        if (html.indexOf(escapedMarker) !== -1) {
             targetDiv.classList.remove('waiting-for-marker', 'hide-mode', 'show-indicator');
             return;
         }
 
-        // 标记未出现 - 隐藏模式
-        if (!showCollapsed) {
+        if (!this.showCollapsed) {
             if (!targetDiv.classList.contains('waiting-for-marker')) {
                 targetDiv.classList.add('waiting-for-marker', 'hide-mode');
-                if (showIndicator) targetDiv.classList.add('show-indicator');
+                if (this.showIndicator) targetDiv.classList.add('show-indicator');
             }
         }
-    }
+    },
 
-    function startObserver() {
-        if (observer) return true;
+    startObserver: function () {
+        if (this.observer) return true;
 
         const chat = document.getElementById('chat');
         if (!chat) return false;
 
-        observer = new MutationObserver(function () {
-            if (isProcessing) return;
+        const self = this;
+        this.observer = new MutationObserver(function () {
+            if (self.isProcessing) return;
             const msg = document.querySelector('.last_mes .mes_text');
-            if (msg) handleStreamingMessage(msg);
+            if (msg) self.handleStreamingMessage(msg);
         });
 
-        observer.observe(chat, { childList: true, subtree: true, characterData: true });
-        debugLog('Observer started');
+        this.observer.observe(chat, { childList: true, subtree: true, characterData: true });
+        this.debugLog('Observer started');
         return true;
-    }
+    },
 
-    function initExtension() {
-        debugLog('Initializing...');
+    init: function () {
+        const self = this;
+        this.debugLog('Initializing...');
 
-        loadSettings();
+        // 动态加载模块，包括 eventSource 和 event_types
+        import('../../../extensions.js').then(function (mod) {
+            self.extension_settings = mod.extension_settings;
+            return import('../../../../script.js');
+        }).then(function (mod) {
+            self.saveSettingsDebounced = mod.saveSettingsDebounced;
 
-        fetch('/' + EXTENSION_FOLDER_PATH + '/settings.html')
+            // 尝试从 script.js 模块获取 eventSource 和 event_types
+            self.eventSource = mod.eventSource;
+            self.event_types = mod.event_types;
+
+            self.debugLog('Modules loaded');
+            self.debugLog('mod.eventSource:', mod.eventSource);
+            self.debugLog('mod.event_types:', mod.event_types);
+
+            self.postInit();
+        }).catch(function (err) {
+            console.error('[noCoT] Module load error:', err);
+        });
+    },
+
+    postInit: function () {
+        const self = this;
+        this.loadSettings();
+
+        fetch('/' + this.EXTENSION_FOLDER_PATH + '/settings.html')
             .then(function (r) { return r.text(); })
             .then(function (html) {
                 const container = document.getElementById('extensions_settings2');
                 if (container) {
                     container.insertAdjacentHTML('beforeend', html);
-                    debugLog('Settings panel loaded');
-                    bindSettingsEvents();
+                    self.debugLog('Settings panel loaded');
+                    self.bindSettingsEvents();
                 }
             })
             .catch(function (e) {
                 console.error('[noCoT] Settings panel error:', e);
             });
 
-        // 注册消息接收事件（获取原始内容）
-        if (typeof eventSource !== 'undefined' && typeof event_types !== 'undefined') {
-            eventSource.on(event_types.MESSAGE_RECEIVED, handleMessageReceived);
-            debugLog('Registered MESSAGE_RECEIVED event handler');
+        // 注册消息接收事件 - 使用从模块导入的 eventSource
+        this.debugLog('self.eventSource:', this.eventSource);
+        this.debugLog('self.event_types:', this.event_types);
+
+        if (this.eventSource && this.event_types) {
+            // 监听多个事件来调试
+            const eventsToListen = [
+                'MESSAGE_RECEIVED',
+                'MESSAGE_SENT',
+                'GENERATION_ENDED',
+                'STREAM_TOKEN_RECEIVED',
+                'CHARACTER_MESSAGE_RENDERED'
+            ];
+
+            for (const eventName of eventsToListen) {
+                if (this.event_types[eventName]) {
+                    this.eventSource.on(this.event_types[eventName], function (data) {
+                        self.debugLog('Event fired:', eventName, 'data:', data);
+                        if (eventName === 'MESSAGE_RECEIVED' || eventName === 'GENERATION_ENDED' || eventName === 'CHARACTER_MESSAGE_RENDERED') {
+                            self.handleMessageReceived(data);
+                        }
+                    });
+                    this.debugLog('Registered', eventName, '=', this.event_types[eventName]);
+                }
+            }
+
+            // 列出所有可用的事件类型
+            this.debugLog('All available event_types:', Object.keys(this.event_types));
         } else {
-            debugLog('eventSource or event_types not available, using observer only');
+            this.debugLog('eventSource not available from module, will use observer only');
         }
 
-        // 启动观察器（用于流式输出时的隐藏）
-        if (!startObserver()) {
+        // 启动观察器
+        if (!this.startObserver()) {
             let tries = 0;
             const timer = setInterval(function () {
-                if (startObserver() || ++tries > 20) clearInterval(timer);
+                if (self.startObserver() || ++tries > 20) clearInterval(timer);
             }, 500);
         }
 
-        debugLog('Initialized! Marker:', currentMarker);
+        this.debugLog('Initialized! Marker:', this.currentMarker);
     }
+};
 
-    if (typeof jQuery !== 'undefined') {
-        jQuery(function () {
-            setTimeout(loadModulesAndInit, 100);
-        });
-    } else {
-        setTimeout(loadModulesAndInit, 500);
-    }
-
-})();
+// 页面加载后初始化
+jQuery(document).ready(function () {
+    setTimeout(function () {
+        noCoT.init();
+    }, 100);
+});
