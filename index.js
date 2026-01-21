@@ -84,23 +84,36 @@
 
     function handleMessage(targetDiv) {
         if (!targetDiv || isProcessing) return;
-        if (targetDiv.dataset.noCoTDone === 'true') return;
+
+        // 如果已处理完成，确保类被移除并跳过
+        if (targetDiv.dataset.noCoTDone === 'true') {
+            // 确保隐藏类被移除（可能被 ST 重新添加）
+            targetDiv.classList.remove('waiting-for-marker', 'hide-mode', 'show-indicator');
+            return;
+        }
 
         const html = targetDiv.innerHTML;
         if (!html || html.length < 5) return;
 
         const idx = html.indexOf(currentMarker);
 
+        debugLog('handleMessage - marker found:', idx !== -1, 'html length:', html.length);
+
         if (idx === -1) {
             // 标记未出现 - 隐藏模式
             if (!showCollapsed) {
-                targetDiv.classList.add('waiting-for-marker', 'hide-mode');
-                if (showIndicator) targetDiv.classList.add('show-indicator');
+                if (!targetDiv.classList.contains('waiting-for-marker')) {
+                    targetDiv.classList.add('waiting-for-marker', 'hide-mode');
+                    if (showIndicator) targetDiv.classList.add('show-indicator');
+                    debugLog('Added hiding classes');
+                }
             }
-            // 折叠模式暂不处理流式，等标记出现后再处理
         } else {
             // 标记已出现
+            debugLog('Marker found! Processing...');
             isProcessing = true;
+
+            // 立即移除隐藏类
             targetDiv.classList.remove('waiting-for-marker', 'hide-mode', 'show-indicator');
             targetDiv.dataset.noCoTDone = 'true';
 
@@ -108,8 +121,10 @@
             const thinkingContent = parts[0];
             const mainContent = parts.slice(1).join(currentMarker);
 
+            debugLog('Thinking content length:', thinkingContent.length, 'Main content length:', mainContent.length);
+
             if (showCollapsed && thinkingContent.trim()) {
-                // 折叠模式 - 仅在标记出现后处理
+                // 折叠模式
                 targetDiv.innerHTML = '<div class="noCoT-thinking-wrapper">' +
                     '<button class="noCoT-thinking-toggle" type="button" onclick="this.classList.toggle(\'expanded\');this.nextElementSibling.classList.toggle(\'expanded\');">' +
                     '<span class="toggle-text">查看思考过程</span><span class="toggle-icon">▼</span></button>' +
@@ -118,8 +133,9 @@
                     '</div></div></div>' +
                     '<div class="noCoT-main-content">' + mainContent + '</div>';
             } else {
-                // 隐藏模式
+                // 隐藏模式 - 只显示主内容
                 targetDiv.innerHTML = mainContent;
+                debugLog('Set innerHTML to main content');
             }
 
             isProcessing = false;
