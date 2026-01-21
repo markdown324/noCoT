@@ -110,8 +110,11 @@
         }
 
         // 详细调试信息
+        debugLog('=== handleMessage ===');
+        debugLog('html length:', html.length);
+        debugLog('html content (first 500 chars):', html.substring(0, 500));
         debugLog('currentMarker:', currentMarker, 'escapedMarker:', escapedMarker);
-        debugLog('marker found:', idx !== -1, 'using:', usedMarker);
+        debugLog('marker found:', idx !== -1, 'at index:', idx, 'using:', usedMarker);
 
         if (idx === -1) {
             // 标记未出现 - 隐藏模式
