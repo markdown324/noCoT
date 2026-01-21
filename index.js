@@ -1,4 +1,5 @@
-// noCoT - 最小化版本，用于排查加载问题
+// noCoT - Stream Content Hider Extension
+// 使用安全的加载模式，支持折叠功能
 
 (function () {
     'use strict';
@@ -21,17 +22,12 @@
     }
 
     function loadModulesAndInit() {
-        // 延迟加载模块，避免阻塞
         import('../../../extensions.js').then(function (mod) {
             extension_settings = mod.extension_settings;
-            debugLog('extensions.js loaded');
-
             return import('../../../../script.js');
         }).then(function (mod) {
             saveSettingsDebounced = mod.saveSettingsDebounced;
-            debugLog('script.js loaded');
-
-            // 模块加载完成后初始化
+            debugLog('Modules loaded');
             initExtension();
         }).catch(function (err) {
             console.error('[noCoT] Module load error:', err);
@@ -55,7 +51,7 @@
             showIndicator = settings.indicator !== false;
             showCollapsed = settings.showCollapsed === true;
 
-            debugLog('Settings loaded');
+            debugLog('Settings loaded:', { currentMarker, showIndicator, showCollapsed });
         } catch (e) {
             console.error('[noCoT] loadSettings error:', e);
         }
@@ -96,9 +92,46 @@
         return `思考了 ${Math.round((Date.now() - streamStartTime) / 1000)} 秒`;
     }
 
+    function createThinkingWrapper(thinkingContent, isStreaming) {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'noCoT-thinking-wrapper' + (isStreaming ? ' streaming' : '');
+
+        const toggle = document.createElement('button');
+        toggle.className = 'noCoT-thinking-toggle';
+        toggle.type = 'button';
+        toggle.innerHTML = '<span class="toggle-text">' + getThinkingDurationText() + '</span><span class="toggle-icon">▼</span>';
+
+        const content = document.createElement('div');
+        content.className = 'noCoT-thinking-content';
+
+        const textDiv = document.createElement('div');
+        textDiv.className = 'thinking-text';
+        textDiv.textContent = thinkingContent.replace(/<[^>]*>/g, '');
+        content.appendChild(textDiv);
+
+        toggle.onclick = function () {
+            this.classList.toggle('expanded');
+            content.classList.toggle('expanded');
+        };
+
+        wrapper.appendChild(toggle);
+        wrapper.appendChild(content);
+
+        return wrapper;
+    }
+
     function handleMessage(targetDiv) {
         if (!targetDiv || isProcessing) return;
-        if (targetDiv.dataset.noCoTDone === 'true') return;
+
+        // 已处理完成的跳过
+        if (targetDiv.dataset.noCoTDone === 'true') {
+            // 只更新时间显示
+            const toggleText = targetDiv.querySelector('.toggle-text');
+            if (toggleText && streamStartTime) {
+                toggleText.textContent = getThinkingDurationText();
+            }
+            return;
+        }
 
         const html = targetDiv.innerHTML;
         if (!html || html.length < 5) return;
@@ -106,21 +139,68 @@
         const idx = html.indexOf(currentMarker);
 
         if (idx === -1) {
-            // 标记未出现
-            if (!showCollapsed) {
-                targetDiv.classList.add('waiting-for-marker', 'hide-mode');
-                if (showIndicator) targetDiv.classList.add('show-indicator');
+            // 标记未出现 - 流式处理中
+            if (showCollapsed) {
+                // 折叠模式：显示可折叠区域
+                if (!streamStartTime) streamStartTime = Date.now();
+
+                if (!targetDiv.querySelector('.noCoT-thinking-wrapper')) {
+                    isProcessing = true;
+
+                    const wrapper = createThinkingWrapper(html, true);
+                    const mainDiv = document.createElement('div');
+                    mainDiv.className = 'noCoT-main-content';
+
+                    targetDiv.innerHTML = '';
+                    targetDiv.appendChild(wrapper);
+                    targetDiv.appendChild(mainDiv);
+
+                    isProcessing = false;
+                } else {
+                    // 更新思考内容
+                    const thinkingText = targetDiv.querySelector('.thinking-text');
+                    if (thinkingText) {
+                        thinkingText.textContent = html.replace(/<[^>]*>/g, '');
+                    }
+                    const toggleText = targetDiv.querySelector('.toggle-text');
+                    if (toggleText) {
+                        toggleText.textContent = getThinkingDurationText();
+                    }
+                }
+            } else {
+                // 隐藏模式
+                if (!targetDiv.classList.contains('waiting-for-marker')) {
+                    targetDiv.classList.add('waiting-for-marker', 'hide-mode');
+                    if (showIndicator) targetDiv.classList.add('show-indicator');
+                }
             }
         } else {
-            // 标记已出现
+            // 标记已出现 - 完成处理
             isProcessing = true;
+
             targetDiv.classList.remove('waiting-for-marker', 'hide-mode', 'show-indicator');
             targetDiv.dataset.noCoTDone = 'true';
 
             const parts = html.split(currentMarker);
+            const thinkingContent = parts[0];
             const mainContent = parts.slice(1).join(currentMarker);
-            targetDiv.innerHTML = mainContent;
 
+            if (showCollapsed && thinkingContent.trim()) {
+                // 折叠模式：显示折叠区域 + 主内容
+                const wrapper = createThinkingWrapper(thinkingContent, false);
+                const mainDiv = document.createElement('div');
+                mainDiv.className = 'noCoT-main-content';
+                mainDiv.innerHTML = mainContent;
+
+                targetDiv.innerHTML = '';
+                targetDiv.appendChild(wrapper);
+                targetDiv.appendChild(mainDiv);
+            } else {
+                // 隐藏模式：只显示主内容
+                targetDiv.innerHTML = mainContent;
+            }
+
+            streamStartTime = null;
             isProcessing = false;
         }
     }
@@ -147,8 +227,7 @@
 
         loadSettings();
 
-        // 加载设置面板
-        fetch(`/${EXTENSION_FOLDER_PATH}/settings.html`)
+        fetch('/' + EXTENSION_FOLDER_PATH + '/settings.html')
             .then(function (r) { return r.text(); })
             .then(function (html) {
                 const container = document.getElementById('extensions_settings2');
@@ -162,7 +241,6 @@
                 console.error('[noCoT] Settings panel error:', e);
             });
 
-        // 启动观察器
         if (!startObserver()) {
             let tries = 0;
             const timer = setInterval(function () {
@@ -173,7 +251,7 @@
         debugLog('Initialized! Marker:', currentMarker);
     }
 
-    // 使用 setTimeout 延迟启动，确保不阻塞其他扩展
+    // 延迟启动，避免阻塞其他扩展
     if (typeof jQuery !== 'undefined') {
         jQuery(function () {
             setTimeout(loadModulesAndInit, 100);
