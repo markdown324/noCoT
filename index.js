@@ -71,15 +71,24 @@ const noCoT = {
     },
 
     handleMessageReceived: function (data) {
-        this.debugLog('=== MESSAGE_RECEIVED ===');
+        this.debugLog('=== handleMessageReceived ===');
+        this.debugLog('data type:', typeof data);
         this.debugLog('data:', data);
 
-        if (!data || !data.mes) {
-            this.debugLog('No message content in data');
+        // 处理不同格式的数据
+        let rawContent;
+        if (typeof data === 'string') {
+            rawContent = data;
+        } else if (data && data.mes) {
+            rawContent = data.mes;
+        } else if (data && typeof data === 'object') {
+            // 尝试查找消息内容
+            rawContent = data.message || data.content || data.text || JSON.stringify(data);
+        } else {
+            this.debugLog('Cannot extract message content from data');
             return;
         }
 
-        const rawContent = data.mes;
         this.debugLog('Raw content (first 500 chars):', rawContent.substring(0, 500));
         this.debugLog('Looking for marker:', this.currentMarker);
 
@@ -96,7 +105,7 @@ const noCoT = {
         const mainContent = rawContent.substring(markerIndex + this.currentMarker.length);
 
         this.debugLog('Thinking content length:', thinkingContent.length);
-        this.debugLog('Main content length:', mainContent.length);
+        this.debugLog('Main content (first 200 chars):', mainContent.substring(0, 200));
 
         // 更新最后一条消息的显示
         const self = this;
