@@ -1,5 +1,5 @@
 // noCoT - Stream Content Hider Extension
-// 使用安全的加载模式，支持折叠功能
+// 修复折叠模式不生效的问题
 
 (function () {
     'use strict';
@@ -7,6 +7,7 @@
     const EXTENSION_NAME = "noCoT";
     const EXTENSION_FOLDER_PATH = `scripts/extensions/third-party/${EXTENSION_NAME}`;
     const DEFAULT_MARKER = "</thinking>";
+    const DEBUG = true;
 
     let extension_settings = null;
     let saveSettingsDebounced = null;
@@ -16,9 +17,10 @@
     let streamStartTime = null;
     let observer = null;
     let isProcessing = false;
+    let lastProcessedContent = '';
 
     function debugLog(...args) {
-        console.log(`[${EXTENSION_NAME}]`, ...args);
+        if (DEBUG) console.log(`[${EXTENSION_NAME}]`, ...args);
     }
 
     function loadModulesAndInit() {
@@ -51,40 +53,39 @@
             showIndicator = settings.indicator !== false;
             showCollapsed = settings.showCollapsed === true;
 
-            debugLog('Settings loaded:', { currentMarker, showIndicator, showCollapsed });
+            debugLog('Settings:', { currentMarker, showIndicator, showCollapsed });
         } catch (e) {
             console.error('[noCoT] loadSettings error:', e);
         }
     }
 
     function bindSettingsEvents() {
-        try {
-            jQuery('#stream_hider_marker').val(currentMarker).on('input', function () {
-                if (extension_settings && extension_settings[EXTENSION_NAME]) {
-                    extension_settings[EXTENSION_NAME].marker = jQuery(this).val();
-                    currentMarker = jQuery(this).val();
-                    if (saveSettingsDebounced) saveSettingsDebounced();
-                }
-            });
+        jQuery('#stream_hider_marker').val(currentMarker).on('input', function () {
+            if (extension_settings && extension_settings[EXTENSION_NAME]) {
+                extension_settings[EXTENSION_NAME].marker = jQuery(this).val();
+                currentMarker = jQuery(this).val();
+                if (saveSettingsDebounced) saveSettingsDebounced();
+                debugLog('Marker changed to:', currentMarker);
+            }
+        });
 
-            jQuery('#stream_hider_show_indicator').prop('checked', showIndicator).on('change', function () {
-                if (extension_settings && extension_settings[EXTENSION_NAME]) {
-                    extension_settings[EXTENSION_NAME].indicator = jQuery(this).is(':checked');
-                    showIndicator = jQuery(this).is(':checked');
-                    if (saveSettingsDebounced) saveSettingsDebounced();
-                }
-            });
+        jQuery('#stream_hider_show_indicator').prop('checked', showIndicator).on('change', function () {
+            if (extension_settings && extension_settings[EXTENSION_NAME]) {
+                extension_settings[EXTENSION_NAME].indicator = jQuery(this).is(':checked');
+                showIndicator = jQuery(this).is(':checked');
+                if (saveSettingsDebounced) saveSettingsDebounced();
+                debugLog('Indicator changed to:', showIndicator);
+            }
+        });
 
-            jQuery('#stream_hider_show_collapsed').prop('checked', showCollapsed).on('change', function () {
-                if (extension_settings && extension_settings[EXTENSION_NAME]) {
-                    extension_settings[EXTENSION_NAME].showCollapsed = jQuery(this).is(':checked');
-                    showCollapsed = jQuery(this).is(':checked');
-                    if (saveSettingsDebounced) saveSettingsDebounced();
-                }
-            });
-        } catch (e) {
-            console.error('[noCoT] bindSettingsEvents error:', e);
-        }
+        jQuery('#stream_hider_show_collapsed').prop('checked', showCollapsed).on('change', function () {
+            if (extension_settings && extension_settings[EXTENSION_NAME]) {
+                extension_settings[EXTENSION_NAME].showCollapsed = jQuery(this).is(':checked');
+                showCollapsed = jQuery(this).is(':checked');
+                if (saveSettingsDebounced) saveSettingsDebounced();
+                debugLog('ShowCollapsed changed to:', showCollapsed);
+            }
+        });
     }
 
     function getThinkingDurationText() {
@@ -92,7 +93,11 @@
         return `思考了 ${Math.round((Date.now() - streamStartTime) / 1000)} 秒`;
     }
 
-    function createThinkingWrapper(thinkingContent, isStreaming) {
+    function createThinkingWrapper(thinkingContent, mainContent, isStreaming) {
+        const container = document.createElement('div');
+        container.className = 'noCoT-container';
+
+        // 思考区域
         const wrapper = document.createElement('div');
         wrapper.className = 'noCoT-thinking-wrapper' + (isStreaming ? ' streaming' : '');
 
@@ -103,29 +108,39 @@
 
         const content = document.createElement('div');
         content.className = 'noCoT-thinking-content';
+        content.innerHTML = '<div class="thinking-text">' + thinkingContent.replace(/<[^>]*>/g, '').replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</div>';
 
-        const textDiv = document.createElement('div');
-        textDiv.className = 'thinking-text';
-        textDiv.textContent = thinkingContent.replace(/<[^>]*>/g, '');
-        content.appendChild(textDiv);
-
-        toggle.onclick = function () {
+        toggle.onclick = function (e) {
+            e.preventDefault();
+            e.stopPropagation();
             this.classList.toggle('expanded');
             content.classList.toggle('expanded');
         };
 
         wrapper.appendChild(toggle);
         wrapper.appendChild(content);
+        container.appendChild(wrapper);
 
-        return wrapper;
+        // 主内容区域
+        if (mainContent) {
+            const mainDiv = document.createElement('div');
+            mainDiv.className = 'noCoT-main-content';
+            mainDiv.innerHTML = mainContent;
+            container.appendChild(mainDiv);
+        }
+
+        return container;
     }
 
     function handleMessage(targetDiv) {
         if (!targetDiv || isProcessing) return;
 
-        // 已处理完成的跳过
-        if (targetDiv.dataset.noCoTDone === 'true') {
-            // 只更新时间显示
+        // 获取当前内容
+        const html = targetDiv.innerHTML;
+        if (!html || html.length < 5) return;
+
+        // 如果已经是我们处理过的容器，只更新内容
+        if (targetDiv.querySelector('.noCoT-container')) {
             const toggleText = targetDiv.querySelector('.toggle-text');
             if (toggleText && streamStartTime) {
                 toggleText.textContent = getThinkingDurationText();
@@ -133,40 +148,28 @@
             return;
         }
 
-        const html = targetDiv.innerHTML;
-        if (!html || html.length < 5) return;
+        // 检查内容是否变化（避免重复处理相同内容）
+        if (html === lastProcessedContent) return;
+        lastProcessedContent = html;
 
         const idx = html.indexOf(currentMarker);
 
+        debugLog('Processing message, marker found:', idx !== -1, 'showCollapsed:', showCollapsed);
+
         if (idx === -1) {
             // 标记未出现 - 流式处理中
+            if (!streamStartTime) streamStartTime = Date.now();
+
             if (showCollapsed) {
-                // 折叠模式：显示可折叠区域
-                if (!streamStartTime) streamStartTime = Date.now();
+                // 折叠模式：替换为折叠容器
+                isProcessing = true;
 
-                if (!targetDiv.querySelector('.noCoT-thinking-wrapper')) {
-                    isProcessing = true;
+                const container = createThinkingWrapper(html, '', true);
+                targetDiv.innerHTML = '';
+                targetDiv.appendChild(container);
 
-                    const wrapper = createThinkingWrapper(html, true);
-                    const mainDiv = document.createElement('div');
-                    mainDiv.className = 'noCoT-main-content';
-
-                    targetDiv.innerHTML = '';
-                    targetDiv.appendChild(wrapper);
-                    targetDiv.appendChild(mainDiv);
-
-                    isProcessing = false;
-                } else {
-                    // 更新思考内容
-                    const thinkingText = targetDiv.querySelector('.thinking-text');
-                    if (thinkingText) {
-                        thinkingText.textContent = html.replace(/<[^>]*>/g, '');
-                    }
-                    const toggleText = targetDiv.querySelector('.toggle-text');
-                    if (toggleText) {
-                        toggleText.textContent = getThinkingDurationText();
-                    }
-                }
+                isProcessing = false;
+                debugLog('Created collapsed wrapper during streaming');
             } else {
                 // 隐藏模式
                 if (!targetDiv.classList.contains('waiting-for-marker')) {
@@ -179,28 +182,24 @@
             isProcessing = true;
 
             targetDiv.classList.remove('waiting-for-marker', 'hide-mode', 'show-indicator');
-            targetDiv.dataset.noCoTDone = 'true';
 
             const parts = html.split(currentMarker);
             const thinkingContent = parts[0];
             const mainContent = parts.slice(1).join(currentMarker);
 
             if (showCollapsed && thinkingContent.trim()) {
-                // 折叠模式：显示折叠区域 + 主内容
-                const wrapper = createThinkingWrapper(thinkingContent, false);
-                const mainDiv = document.createElement('div');
-                mainDiv.className = 'noCoT-main-content';
-                mainDiv.innerHTML = mainContent;
-
+                // 折叠模式
+                const container = createThinkingWrapper(thinkingContent, mainContent, false);
                 targetDiv.innerHTML = '';
-                targetDiv.appendChild(wrapper);
-                targetDiv.appendChild(mainDiv);
+                targetDiv.appendChild(container);
+                debugLog('Created final collapsed wrapper');
             } else {
-                // 隐藏模式：只显示主内容
+                // 隐藏模式
                 targetDiv.innerHTML = mainContent;
             }
 
             streamStartTime = null;
+            lastProcessedContent = '';
             isProcessing = false;
         }
     }
@@ -211,13 +210,22 @@
         const chat = document.getElementById('chat');
         if (!chat) return false;
 
-        observer = new MutationObserver(function () {
+        observer = new MutationObserver(function (mutations) {
             if (isProcessing) return;
+
+            // 只处理最后一条消息
             const msg = document.querySelector('.last_mes .mes_text');
-            if (msg) handleMessage(msg);
+            if (msg) {
+                handleMessage(msg);
+            }
         });
 
-        observer.observe(chat, { childList: true, subtree: true, characterData: true });
+        observer.observe(chat, {
+            childList: true,
+            subtree: true,
+            characterData: true
+        });
+
         debugLog('Observer started');
         return true;
     }
@@ -248,10 +256,9 @@
             }, 500);
         }
 
-        debugLog('Initialized! Marker:', currentMarker);
+        debugLog('Initialized!');
     }
 
-    // 延迟启动，避免阻塞其他扩展
     if (typeof jQuery !== 'undefined') {
         jQuery(function () {
             setTimeout(loadModulesAndInit, 100);
