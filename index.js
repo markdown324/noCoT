@@ -112,7 +112,7 @@
         // 详细调试信息
         debugLog('=== handleMessage ===');
         debugLog('html length:', html.length);
-        debugLog('html content (first 500 chars):', html.substring(0, 500));
+        debugLog('html content (first 2000 chars):', html.substring(0, 2000));
         debugLog('currentMarker:', currentMarker, 'escapedMarker:', escapedMarker);
         debugLog('marker found:', idx !== -1, 'at index:', idx, 'using:', usedMarker);
 
