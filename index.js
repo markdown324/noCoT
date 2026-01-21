@@ -95,13 +95,23 @@
         const html = targetDiv.innerHTML;
         if (!html || html.length < 5) return;
 
-        const idx = html.indexOf(currentMarker);
+        // 同时搜索原始标记和 HTML 转义版本
+        // 例如: </thinking> 和 &lt;/thinking&gt;
+        const escapedMarker = currentMarker
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+
+        let idx = html.indexOf(currentMarker);
+        let usedMarker = currentMarker;
+
+        if (idx === -1) {
+            idx = html.indexOf(escapedMarker);
+            usedMarker = escapedMarker;
+        }
 
         // 详细调试信息
-        debugLog('=== handleMessage ===');
-        debugLog('currentMarker:', JSON.stringify(currentMarker));
-        debugLog('html (first 300 chars):', html.substring(0, 300));
-        debugLog('marker found:', idx !== -1, 'at index:', idx);
+        debugLog('currentMarker:', currentMarker, 'escapedMarker:', escapedMarker);
+        debugLog('marker found:', idx !== -1, 'using:', usedMarker);
 
         if (idx === -1) {
             // 标记未出现 - 隐藏模式
@@ -121,9 +131,9 @@
             targetDiv.classList.remove('waiting-for-marker', 'hide-mode', 'show-indicator');
             targetDiv.dataset.noCoTDone = 'true';
 
-            const parts = html.split(currentMarker);
+            const parts = html.split(usedMarker);
             const thinkingContent = parts[0];
-            const mainContent = parts.slice(1).join(currentMarker);
+            const mainContent = parts.slice(1).join(usedMarker);
 
             debugLog('Thinking content length:', thinkingContent.length, 'Main content length:', mainContent.length);
 
